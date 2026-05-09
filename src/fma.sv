@@ -1,4 +1,3 @@
-// FMA: fused multiply-add unit computing result = (a * b) + c
 module fma #(
     parameter DATA_WIDTH = 16
 )(
@@ -7,8 +6,23 @@ module fma #(
     input logic valid_in,
 
     output logic [DATA_WIDTH-1:0] result,
-    output logic valid_out, ready
+    output logic valid_out
 );
-    // Instantiates: none
+
+    logic [2*DATA_WIDTH-1:0] product;
+    logic [DATA_WIDTH-1:0] product_aligned;
+
+    assign product = a * b;
+    assign product_aligned = product[DATA_WIDTH-1:0];
+
+    always_ff @(posedge clk) begin
+        if (rst) begin
+            result <= 0;
+            valid_out <= 0;
+        end else begin
+            valid_out <= valid_in;
+            if (valid_in) result <= product_aligned + c;
+        end
+    end
 
 endmodule
