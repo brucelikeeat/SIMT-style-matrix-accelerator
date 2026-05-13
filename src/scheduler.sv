@@ -61,8 +61,9 @@ module scheduler #(
     logic [7:0] t_cnt;
     logic [7:0] k_cnt;
 
-    logic is_last_thread = (t_cnt == thread_count - 8'd1); //used to terminate the loop  
-    logic is_last_k      = (k_cnt == N - 8'd1);
+    logic is_last_thread, is_last_k;
+    assign is_last_thread = (t_cnt == thread_count - 8'd1);
+    assign is_last_k      = (k_cnt == N            - 8'd1);
 
     // FSM
     always_ff @(posedge clk) begin
