@@ -25,127 +25,118 @@ module scheduler #(
     input  logic [7:0]                        N,
     input  logic [7:0]                        thread_count,
 
-    // To core: which thread's address bus drives the BRAMs this cycle
+    // To core: which thread's address bus drives the BRAM port this cycle
     output logic [TSEL-1:0]                   t_select,
 
-    // To threads: per-thread one-cycle pulses
+    // To threads: per-thread one-hot pulses
     output logic [THREADS_PER_CORE-1:0]       data_valid,
     output logic [THREADS_PER_CORE-1:0]       fma_en,
     output logic [7:0]                        k,
 
-    // memory write 
-    output logic                              mem_write_en,
+    // To core: memory phase signals
+    output logic                              mem_read_a_en,   // drive addr_A this cycle
+    output logic                              mem_read_b_en,   // drive addr_B this cycle
+    output logic                              mem_write_en,    // drive addr_C / result this cycle
 
-    
+    output logic [3:0]                        state,           // exposed for debug / TB
     output logic                              done
 );
 
+    typedef enum logic [3:0] {
+        IDLE,
+        INIT,
+        ISSUE_A,
+        ISSUE_B,
+        FMA,
+        NEXT_T,
+        NEXT_K,
+        WRITE,
+        NEXT_W,
+        DONE_S
+    } state_t;
 
-    // State encoding bits
-    localparam [3:0] IDLE    = 4'b0000;  // wait for start
-    localparam [3:0] INIT    = 4'b0001;  // reset counters
-    localparam [3:0] WAIT   = 4'b0010;   // wait one cycle for addresses to propagate to BRAM and data to come back
-    localparam [3:0] FMA     = 4'b0011;  // BRAM data on bus, pulse fma_en[t]
-    localparam [3:0] NEXT_T  = 4'b0100;  // advance t or move to NEXT_K
-    localparam [3:0] NEXT_K  = 4'b0101;  // advance k or move to write phase
-    localparam [3:0] WRITE   = 4'b0110;  // pulse mem_write_en for thread[t]
-    localparam [3:0] NEXT_W  = 4'b0111;  // advance t in write phase, or DONE
-    localparam [3:0] DONE    = 4'b1000;  // hold done high
-
-    logic [3:0] state;
+    state_t state_r;
 
     // Counters
     logic [7:0] t_cnt;
     logic [7:0] k_cnt;
 
-    wire is_last_thread = (t_cnt == thread_count - 8'd1); //used to terminate the loop  
-    wire is_last_k      = (k_cnt == N - 8'd1);
-
-
+    logic is_last_thread = (t_cnt == thread_count - 8'd1); //used to terminate the loop  
+    logic is_last_k      = (k_cnt == N - 8'd1);
 
     // FSM
     always_ff @(posedge clk) begin
         if (rst) begin
-            state        <= IDLE;
-            t_cnt        <= '0;
-            k_cnt        <= '0;
-            done         <= 1'b0;
-            data_valid   <= '0;
-            fma_en       <= '0;
-            mem_write_en <= 1'b0;
+            state_r <= IDLE;
+            t_cnt <= 0;
+            k_cnt <= 0;
         end else begin
-            // Default: deassert one-cycle pulses every cycle
-            data_valid   <= '0;
-            fma_en       <= '0;
-            mem_write_en <= 1'b0;
-
-            case (state)
+            case (state_r)
                 IDLE: begin
-                    done <= 1'b0;
-                    if (start) state <= INIT;
+                    if (start) state_r <= INIT;
                 end
 
                 INIT: begin
-                    t_cnt <= 0;
-                    k_cnt <= 0;
-                    state <= WAIT;
+                    t_cnt   <= '0;
+                    k_cnt   <= '0;
+                    state_r <= ISSUE_A;
                 end
 
-                WAIT: begin
-                    state <= FMA;
-                end
-
-                FMA: begin
-                    data_valid[t_cnt[TSEL-1:0]] <= 1'b1;
-                    fma_en    [t_cnt[TSEL-1:0]] <= 1'b1;
-                    state                        <= NEXT_T;
-                end
+                ISSUE_A: state_r <= ISSUE_B;
+                ISSUE_B: state_r <= FMA;
+                FMA:     state_r <= NEXT_T;
 
                 NEXT_T: begin
                     if (is_last_thread) begin
-                        t_cnt <= '0;
-                        state <= NEXT_K;
+                        t_cnt   <= '0;
+                        state_r <= NEXT_K;
                     end else begin
-                        t_cnt <= t_cnt + 8'd1;
-                        state <= WAIT;
+                        t_cnt   <= t_cnt + 8'd1;
+                        state_r <= ISSUE_A;
                     end
                 end
 
                 NEXT_K: begin
                     if (is_last_k) begin
-                        t_cnt <= '0;
-                        state <= WRITE;
+                        t_cnt   <= '0;
+                        state_r <= WRITE;
                     end else begin
-                        k_cnt <= k_cnt + 8'd1;
-                        state <= WAIT;
+                        k_cnt   <= k_cnt + 8'd1;
+                        state_r <= ISSUE_A;
                     end
                 end
 
-                WRITE: begin
-                    mem_write_en <= 1'b1;
-                    state        <= NEXT_W;
-                end
+                WRITE: state_r <= NEXT_W;
 
                 NEXT_W: begin
                     if (is_last_thread) begin
-                        state <= DONE;
+                        state_r <= DONE_S;
                     end else begin
-                        t_cnt <= t_cnt + 8'd1;
-                        state <= WRITE;
+                        t_cnt   <= t_cnt + 8'd1;
+                        state_r <= WRITE;
                     end
                 end
 
-                DONE: begin
-                    done <= 1'b1;
-                end
-
-                default: state <= IDLE;
+                DONE_S:  state_r <= IDLE;
+                default: state_r <= IDLE;
             endcase
         end
     end
 
-    // Combinational outputs
-    assign t_select = t_cnt[TSEL-1:0];
-    assign k        = k_cnt;
-
+    // Mealy outputs (combinational from `state_r` + `t_cnt`)
+    always_comb begin
+        data_valid = '0;
+        fma_en     = '0;
+        if (state_r == FMA) begin
+            data_valid[t_cnt[TSEL-1:0]] = 1'b1;
+            fma_en    [t_cnt[TSEL-1:0]] = 1'b1;
+        end
+        t_select      = t_cnt[TSEL-1:0];
+        k             = k_cnt;
+        mem_read_a_en = (state_r == ISSUE_A);
+        mem_read_b_en = (state_r == ISSUE_B);
+        mem_write_en  = (state_r == WRITE);
+        done          = (state_r == DONE_S);
+        state         = state_r;
+    end
 endmodule
