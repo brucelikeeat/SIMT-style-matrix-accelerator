@@ -14,7 +14,7 @@ module dispatcher #(
     output logic done
 );
 
-    typedef enum logic [1:0] { IDLE, LATCH,DISPATCH, WAIT_DONE, FINISH } state_t;
+    typedef enum logic [2:0] { IDLE, LATCH, DISPATCH, WAIT_DONE, FINISH } state_t;
     state_t state;
 
     logic [15:0] next_thread_id;
