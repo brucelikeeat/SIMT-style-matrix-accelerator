@@ -29,7 +29,7 @@ module core #(
 
     // Per-thread outputs (each thread emits its own addr_A/B/C and result)
     logic [ADDR_WIDTH-1:0] t_addr_A [THREADS_PER_CORE-1:0];
-    logic [ADDR_WIDTH-1:0] t_addr_B [THREADS_PER_CORE-1:0];
+    logic [ADDR_WIDTH-1:0] t_addr_B [THREADS_PER_CORE-1:0]; 
     logic [ADDR_WIDTH-1:0] t_addr_C [THREADS_PER_CORE-1:0];
     logic [DATA_WIDTH-1:0] t_result [THREADS_PER_CORE-1:0];
 
