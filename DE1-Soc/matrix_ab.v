@@ -43,8 +43,6 @@ module matrix_ab (
 	clock,
 	data_a,
 	data_b,
-	rden_a,
-	rden_b,
 	wren_a,
 	wren_b,
 	q_a,
@@ -55,18 +53,14 @@ module matrix_ab (
 	input	  clock;
 	input	[15:0]  data_a;
 	input	[15:0]  data_b;
-	input	  rden_a;
-	input	  rden_b;
 	input	  wren_a;
 	input	  wren_b;
 	output	[15:0]  q_a;
 	output	[15:0]  q_b;
 `ifndef ALTERA_RESERVED_QIS
-// synopsys translate_off
+//synopsys translate_off
 `endif
 	tri1	  clock;
-	tri1	  rden_a;
-	tri1	  rden_b;
 	tri0	  wren_a;
 	tri0	  wren_b;
 `ifndef ALTERA_RESERVED_QIS
@@ -84,8 +78,6 @@ module matrix_ab (
 				.clock0 (clock),
 				.data_a (data_a),
 				.data_b (data_b),
-				.rden_a (rden_a),
-				.rden_b (rden_b),
 				.wren_a (wren_a),
 				.wren_b (wren_b),
 				.q_a (sub_wire0),
@@ -101,15 +93,36 @@ module matrix_ab (
 				.clocken1 (1'b1),
 				.clocken2 (1'b1),
 				.clocken3 (1'b1),
-				.eccstatus ());
+				.eccstatus (),
+				.rden_a (1'b1),
+				.rden_b (1'b1));
 	defparam
+		// CONCLUSION (confirmed by simulation, not just theory): this
+		// altsyncram IP, in BIDIR_DUAL_PORT/M10K mode, has a real 2-cycle
+		// read latency (registered address + registered output) on BOTH
+		// ports, and that cannot be changed via parameters:
+		//   - address_reg_a isn't even exposed as a settable parameter in
+		//     this mode (unresolved defparam if you try to add it).
+		//   - address_reg_b IS exposed, but setting it to "UNREGISTERED"
+		//     is rejected outright by the altsyncram simulation model
+		//     itself ("Error: UNREGISTERED value for address_reg_b is not
+		//     supported."), which calls $finish before the testbench even
+		//     starts. This isn't an old-library gap -- the megafunction is
+		//     telling us this mode structurally requires a registered
+		//     address input.
+		// So address_reg_b is back to its original, supported "CLOCK0".
+		// The 1-cycle-latency assumption baked into rr_read_arbiter.sv
+		// (and matched by dual_port_bram.sv) is real silicon-mismatched
+		// against this IP's actual 2-cycle latency, and must be fixed on
+		// the RTL side instead (see rr_read_arbiter.sv's BRAM_LATENCY
+		// parameter), not by fighting this IP's parameter set further.
 		altsyncram_component.address_reg_b = "CLOCK0",
 		altsyncram_component.clock_enable_input_a = "BYPASS",
 		altsyncram_component.clock_enable_input_b = "BYPASS",
 		altsyncram_component.clock_enable_output_a = "BYPASS",
 		altsyncram_component.clock_enable_output_b = "BYPASS",
 		altsyncram_component.indata_reg_b = "CLOCK0",
-		altsyncram_component.init_file = "../../Users/User/Desktop/Year 3/DE1-SoC-GPU/matrix.mif/matrixA.mif",
+		altsyncram_component.init_file = "matrix_ab.mif",
 		altsyncram_component.intended_device_family = "Cyclone V",
 		altsyncram_component.lpm_type = "altsyncram",
 		altsyncram_component.numwords_a = 256,
@@ -170,7 +183,7 @@ endmodule
 // Retrieval info: PRIVATE: MAXIMUM_DEPTH NUMERIC "0"
 // Retrieval info: PRIVATE: MEMSIZE NUMERIC "4096"
 // Retrieval info: PRIVATE: MEM_IN_BITS NUMERIC "0"
-// Retrieval info: PRIVATE: MIFfilename STRING "../../Users/User/Desktop/Year 3/DE1-SoC-GPU/matrix.mif/matrixA.mif"
+// Retrieval info: PRIVATE: MIFfilename STRING "matrix_ab.mif"
 // Retrieval info: PRIVATE: OPERATION_MODE NUMERIC "3"
 // Retrieval info: PRIVATE: OUTDATA_ACLR_B NUMERIC "0"
 // Retrieval info: PRIVATE: OUTDATA_REG_B NUMERIC "1"
@@ -181,7 +194,7 @@ endmodule
 // Retrieval info: PRIVATE: REGdata NUMERIC "1"
 // Retrieval info: PRIVATE: REGq NUMERIC "1"
 // Retrieval info: PRIVATE: REGrdaddress NUMERIC "0"
-// Retrieval info: PRIVATE: REGrren NUMERIC "1"
+// Retrieval info: PRIVATE: REGrren NUMERIC "0"
 // Retrieval info: PRIVATE: REGwraddress NUMERIC "1"
 // Retrieval info: PRIVATE: REGwren NUMERIC "1"
 // Retrieval info: PRIVATE: SYNTH_WRAPPER_GEN_POSTFIX STRING "0"
@@ -196,7 +209,7 @@ endmodule
 // Retrieval info: PRIVATE: WRADDR_REG_B NUMERIC "1"
 // Retrieval info: PRIVATE: WRCTRL_ACLR_B NUMERIC "0"
 // Retrieval info: PRIVATE: enable NUMERIC "0"
-// Retrieval info: PRIVATE: rden NUMERIC "1"
+// Retrieval info: PRIVATE: rden NUMERIC "0"
 // Retrieval info: LIBRARY: altera_mf altera_mf.altera_mf_components.all
 // Retrieval info: CONSTANT: ADDRESS_REG_B STRING "CLOCK0"
 // Retrieval info: CONSTANT: CLOCK_ENABLE_INPUT_A STRING "BYPASS"
@@ -204,7 +217,7 @@ endmodule
 // Retrieval info: CONSTANT: CLOCK_ENABLE_OUTPUT_A STRING "BYPASS"
 // Retrieval info: CONSTANT: CLOCK_ENABLE_OUTPUT_B STRING "BYPASS"
 // Retrieval info: CONSTANT: INDATA_REG_B STRING "CLOCK0"
-// Retrieval info: CONSTANT: INIT_FILE STRING "../../Users/User/Desktop/Year 3/DE1-SoC-GPU/matrix.mif/matrixA.mif"
+// Retrieval info: CONSTANT: INIT_FILE STRING "matrix_ab.mif"
 // Retrieval info: CONSTANT: INTENDED_DEVICE_FAMILY STRING "Cyclone V"
 // Retrieval info: CONSTANT: LPM_TYPE STRING "altsyncram"
 // Retrieval info: CONSTANT: NUMWORDS_A NUMERIC "256"
@@ -233,8 +246,6 @@ endmodule
 // Retrieval info: USED_PORT: data_b 0 0 16 0 INPUT NODEFVAL "data_b[15..0]"
 // Retrieval info: USED_PORT: q_a 0 0 16 0 OUTPUT NODEFVAL "q_a[15..0]"
 // Retrieval info: USED_PORT: q_b 0 0 16 0 OUTPUT NODEFVAL "q_b[15..0]"
-// Retrieval info: USED_PORT: rden_a 0 0 0 0 INPUT VCC "rden_a"
-// Retrieval info: USED_PORT: rden_b 0 0 0 0 INPUT VCC "rden_b"
 // Retrieval info: USED_PORT: wren_a 0 0 0 0 INPUT GND "wren_a"
 // Retrieval info: USED_PORT: wren_b 0 0 0 0 INPUT GND "wren_b"
 // Retrieval info: CONNECT: @address_a 0 0 8 0 address_a 0 0 8 0
@@ -242,8 +253,6 @@ endmodule
 // Retrieval info: CONNECT: @clock0 0 0 0 0 clock 0 0 0 0
 // Retrieval info: CONNECT: @data_a 0 0 16 0 data_a 0 0 16 0
 // Retrieval info: CONNECT: @data_b 0 0 16 0 data_b 0 0 16 0
-// Retrieval info: CONNECT: @rden_a 0 0 0 0 rden_a 0 0 0 0
-// Retrieval info: CONNECT: @rden_b 0 0 0 0 rden_b 0 0 0 0
 // Retrieval info: CONNECT: @wren_a 0 0 0 0 wren_a 0 0 0 0
 // Retrieval info: CONNECT: @wren_b 0 0 0 0 wren_b 0 0 0 0
 // Retrieval info: CONNECT: q_a 0 0 16 0 @q_a 0 0 16 0

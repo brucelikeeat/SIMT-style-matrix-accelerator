@@ -1,27 +1,12 @@
 // =============================================================================
-// de1soc_top.sv — DE1-SoC board-level wrapper (what gets synthesised)
+// File:    de1soc_top.sv
 //
-// Brings the GPU up against the Terasic DE1-SoC's physical I/O:
-//   - CLOCK_50         : 50 MHz onboard oscillator
-//   - KEY[3:0]         : active-low push buttons (KEY[0]=reset, KEY[1]=start)
-//   - LEDR[9:0]        : status LEDs (LEDR[0]=done)
-//   - HEX0..HEX3       : 7-seg, latched to C[0][0] when it gets written
+// Module Description:
+//   Board-level wrapper for the DE1-SoC. Connects gpu_top to CLOCK_50, KEY,
+//   LEDR, and HEX displays; instantiates the two Quartus memory IPs.
 //
-// Memory architecture (memory-controller version — Choice B, NUM_CORES=4):
-//   - 3x dual_port_bram instances — one each for A, B, C.
-//   - Only PORT A of each BRAM is used; it is shared by all NUM_CORES cores
-//     through a round-robin arbiter inside gpu_top (rr_read_arbiter for A/B,
-//     rr_write_arbiter for C). Port B is tied off/unused here — it's free
-//     bandwidth for a future revision (e.g. host readback of C) but is not
-//     needed for this architecture.
-//   - Unlike the old 2-core design (one BRAM port per core, zero
-//     arbitration), 4 cores now contend for one read port on A, one read
-//     port on B, and one write port on C. That contention is the point:
-//     it's what makes the memory controller's round-robin grant logic and
-//     per-core stall counters mean something.
-//
-// NUM_CORES is a true parameter here — bump it (and watch a/b/c_stall_cycles
-// climb) to see the scalability/contention tradeoff directly.
+// I/O:
+//   KEY[0]=reset, KEY[1]=start. LEDR[0]=done. HEX3..0: "DONE" or C[0][0].
 // =============================================================================
 `timescale 1ns/1ps
 
@@ -43,6 +28,9 @@ module de1soc_top #(
     output logic [6:0]   HEX3
 );
 
+
+
+
     // ── Clock and reset ─────────────────────────────────────────────────
     logic clk;
     assign clk = CLOCK_50;
@@ -56,10 +44,16 @@ module de1soc_top #(
     logic start;
     assign start = ~KEY[1];
 
+    // LEDR[1] lit while any core is stalled on memory contention
+    logic any_core_stalling;
+
     // ── Kernel parameters (hardcoded for this hardware build) ──────────
     logic [7:0]              N           = N_MAT[7:0];
     logic [ADDR_WIDTH-1:0]   base_addr_A = '0;
-    logic [ADDR_WIDTH-1:0]   base_addr_B = '0;
+    // A and B now share one physical dual-port BRAM (matrix_ab, see below),
+    // so B must live at a disjoint offset within that same 256-word array.
+    // base_addr_B = N*N puts B right after A's N*N words.
+    logic [ADDR_WIDTH-1:0]   base_addr_B = ADDR_WIDTH'(N_MAT * N_MAT);
     logic [ADDR_WIDTH-1:0]   base_addr_C = '0;
 
     // ── Single shared BRAM port per matrix (arbitrated inside gpu_top) ──
@@ -86,11 +80,16 @@ module de1soc_top #(
 
     // ── GPU ─────────────────────────────────────────────────────────────
     gpu_top #(
-        .DATA_WIDTH        (DATA_WIDTH),
-        .ADDR_WIDTH        (ADDR_WIDTH),
-        .NUM_CORES         (NUM_CORES),
-        .THREADS_PER_CORE  (THREADS_PER_CORE),
-        .BRAM_READ_LATENCY (BRAM_READ_LATENCY)
+        .DATA_WIDTH          (DATA_WIDTH),
+        .ADDR_WIDTH          (ADDR_WIDTH),
+        .NUM_CORES           (NUM_CORES),
+        .THREADS_PER_CORE    (THREADS_PER_CORE),
+        // matrix_ab (real altsyncram IP, BIDIR_DUAL_PORT) has a true
+        // 2-cycle read latency (registered address + registered output)
+        // that can't be configured down to 1 -- see matrix_ab.v and
+        // rr_read_arbiter.sv for the full story. gpu_top_tb's
+        // dual_port_bram-backed sim keeps the default of 1.
+        .BRAM_READ_LATENCY   (2)
     ) u_gpu (
         .clk            (clk),
         .rst            (rst),
@@ -122,60 +121,59 @@ module de1soc_top #(
         .core_stall_cycles (core_stall_cycles)
     );
 
-    // ── BRAM A (input matrix A) ─────────────────────────────────────────
-    // Only port A used — shared by all cores via the read arbiter in
-    // gpu_top. Port B is tied off (reserved for future host readback).
-    logic [DATA_WIDTH-1:0] bram_a_portb_unused;
-    dual_port_bram #(
-        .DATA_WIDTH (DATA_WIDTH),
-        .ADDR_WIDTH (ADDR_WIDTH),
-        .DEPTH      (BRAM_DEPTH)
-    ) bram_A (
-        .clk       (clk),
-        .a_addr    (bram_a_addr), .a_wr_en (1'b0), .a_wr_data ('0), .a_rd_data (bram_a_rd_data),
-        .b_addr    ('0),          .b_wr_en (1'b0), .b_wr_data ('0), .b_rd_data (bram_a_portb_unused)
-    );
-
-    // ── BRAM B (input matrix B) ─────────────────────────────────────────
-    logic [DATA_WIDTH-1:0] bram_b_portb_unused;
-    dual_port_bram #(
-        .DATA_WIDTH (DATA_WIDTH),
-        .ADDR_WIDTH (ADDR_WIDTH),
-        .DEPTH      (BRAM_DEPTH)
-    ) bram_B (
-        .clk       (clk),
-        .a_addr    (bram_b_addr), .a_wr_en (1'b0), .a_wr_data ('0), .a_rd_data (bram_b_rd_data),
-        .b_addr    ('0),          .b_wr_en (1'b0), .b_wr_data ('0), .b_rd_data (bram_b_portb_unused)
+    // ── Matrix A/B memory: one shared dual-port BRAM IP ─────────────────
+    // matrix_ab (Quartus altsyncram megafunction, BIDIR_DUAL_PORT) is ONE
+    // 256-word x 16-bit array with two independent access ports — not two
+    // separate buffers. Port A reads matrix A starting at base_addr_A=0;
+    // port B reads matrix B starting at base_addr_B=N*N, in the SAME
+    // physical block. This genuinely uses both ports (vs. the old
+    // dual_port_bram instances, which each only used port A and left port B
+    // tied off). Preloaded from DE1-Soc/matrix_ab.mif at configuration time;
+    // there is no runtime write path here (wren tied low) — reload the .mif
+    // and recompile to change inputs.
+    // NOTE: this particular wizard config of matrix_ab has no rden_a/rden_b
+    // ports at all (read is implicitly always-on) — bram_a_rd_en/bram_b_rd_en
+    // from gpu_top are simply left unconnected here.
+    matrix_ab u_matrix_ab (
+        .address_a (bram_a_addr[7:0]),
+        .address_b (bram_b_addr[7:0]),
+        .clock     (clk),
+        .data_a    (16'd0),
+        .data_b    (16'd0),
+        .wren_a    (1'b0),
+        .wren_b    (1'b0),
+        .q_a       (bram_a_rd_data),
+        .q_b       (bram_b_rd_data)
     );
 
     // ── BRAM C (output matrix C) ────────────────────────────────────────
-    // Write-only from the GPU's perspective via port A (shared by all
-    // cores through the write arbiter). Port B's read data is left
-    // unconnected; expose it at this level if host readback is needed.
-    logic [DATA_WIDTH-1:0] bram_c_rd_porta_unused;
-    logic [DATA_WIDTH-1:0] bram_c_rd_portb_unused;
-    dual_port_bram #(
-        .DATA_WIDTH (DATA_WIDTH),
-        .ADDR_WIDTH (ADDR_WIDTH),
-        .DEPTH      (BRAM_DEPTH)
-    ) bram_C (
-        .clk       (clk),
-        .a_addr    (bram_c_addr), .a_wr_en (bram_c_wr_en), .a_wr_data (bram_c_wr_data), .a_rd_data (bram_c_rd_porta_unused),
-        .b_addr    ('0),          .b_wr_en (1'b0),         .b_wr_data ('0),             .b_rd_data (bram_c_rd_portb_unused)
+    // matrix_c (Quartus altsyncram megafunction, SINGLE_PORT, ENABLE_RUNTIME_MOD=YES,
+    // JTAG_ID="C") replaces the old dual_port_bram instance. Write side is
+    // driven by gpu_top's write arbiter exactly as before. Host readback no
+    // longer needs a wired-up port B: ENABLE_RUNTIME_MOD + JTAG_ENABLED makes
+    // Quartus auto-insert a virtual-JTAG hub for this block, so it shows up
+    // as "C" in Tools > In-System Memory Content Editor at runtime with no
+    // extra top-level pins. q is unused here (GPU never reads C back).
+    logic [DATA_WIDTH-1:0] bram_c_q_unused;
+    matrix_c u_matrix_c (
+        .address (bram_c_addr[7:0]),
+        .clock   (clk),
+        .data    (bram_c_wr_data),
+        .rden    (1'b1),
+        .wren    (bram_c_wr_en),
+        .q       (bram_c_q_unused)
     );
 
-    // ── Status LEDs ─────────────────────────────────────────────────────
+    // Status LEDs
     assign LEDR[0]   = done;
-    // LEDR[1] lit while any core is stalled on memory contention — quick
-    // visual confirmation the arbiters are actually doing something.
-    logic any_core_stalling;
+   
     always_comb begin
         any_core_stalling = 1'b0;
         for (int i = 0; i < NUM_CORES; i++)
             if (core_stall_cycles[i] != 32'd0) any_core_stalling = 1'b1;
     end
     assign LEDR[1]   = any_core_stalling;
-    assign LEDR[9:2] = '0;
+    assign LEDR[9:2] = 8'b0;
 
     // ── HEX displays: latch C[0][0] for visual verification ────────────
     // Holds 16'hDEAD until the first write to address 0 lands, then locks
@@ -189,10 +187,32 @@ module de1soc_top #(
             hex_value <= bram_c_wr_data;
     end
 
-    seven_seg hd0 (.in(hex_value[3:0]),   .out(HEX0));
-    seven_seg hd1 (.in(hex_value[7:4]),   .out(HEX1));
-    seven_seg hd2 (.in(hex_value[11:8]),  .out(HEX2));
-    seven_seg hd3 (.in(hex_value[15:12]), .out(HEX3));
+    // Decode C[0][0]'s four hex nibbles as usual; these feed the muxes below.
+    logic [6:0] hex0_digit, hex1_digit, hex2_digit, hex3_digit;
+    seven_seg hd0 (.in(hex_value[3:0]),   .out(hex0_digit));
+    seven_seg hd1 (.in(hex_value[7:4]),   .out(hex1_digit));
+    seven_seg hd2 (.in(hex_value[11:8]),  .out(hex2_digit));
+    seven_seg hd3 (.in(hex_value[15:12]), .out(hex3_digit));
+
+    // While `done` is asserted -- it's a sticky level (dispatcher.sv's FSM
+    // only clears it on the next `start` pulse, see the IDLE state; it does
+    // NOT drop back to 0 on its own), not a single-cycle pulse -- override
+    // all four displays to spell "DONE" instead of C[0][0]'s hex digits.
+    // 'O' and 'N' aren't real hex digits, so they can't go through
+    // seven_seg's 0-F decoder; their segment patterns are hardcoded here.
+    // D and E reuse the exact same shapes seven_seg already draws for hex
+    // digits 'd' and 'E'.
+    localparam logic [6:0] SEG_D = 7'b0100001;  // same shape as hex digit 'd'
+    localparam logic [6:0] SEG_O = 7'b1000000;  // same shape as hex digit '0'
+    localparam logic [6:0] SEG_N = 7'b0101011;  // lowercase 'n'
+    localparam logic [6:0] SEG_E = 7'b0000110;  // same shape as hex digit 'E'
+
+    // HEX3 is the leftmost digit on the board, so HEX3..HEX0 = D,O,N,E reads
+    // left-to-right as "DONE".
+    assign HEX3 = done ? SEG_D : hex3_digit;
+    assign HEX2 = done ? SEG_O : hex2_digit;
+    assign HEX1 = done ? SEG_N : hex1_digit;
+    assign HEX0 = done ? SEG_E : hex0_digit;
 
 endmodule
 
