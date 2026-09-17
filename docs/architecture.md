@@ -257,9 +257,22 @@ block for simulation.
 
 ---
 
+## Module ownership (Bruce Liu)
+
+| Module | Notes |
+|--------|--------|
+| `dispatcher.sv` | Author |
+| `thread.sv` | Author |
+| `fma.sv` | Author |
+| `rr_read_arbiter.sv` | Author |
+| `rr_write_arbiter.sv` | Author |
+| Related TBs | See `docs/verification.md` (many TBs: Pouya v1 → Bruce v2 revise/rewrite) |
+
+**[EMPTY — other teammates fill their modules here]**
+
 ## Gaps for teammates to fill
 
-1. **[EMPTY]** Author list / ownership per module  
+1. **[EMPTY]** Full team author list for remaining modules (`gpu_top`, `core`, `scheduler`, `de1soc_top`, …)  
 2. **[EMPTY]** Measured FPGA timing / Fmax / resource use  
 3. **[EMPTY]** Why `THREADS_PER_CORE=2` specifically for the demo  
 4. **[EMPTY]** Host path to load A/B into BRAM on hardware (MIF? HPS? buttons only?)  

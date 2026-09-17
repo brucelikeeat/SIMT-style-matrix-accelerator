@@ -1,5 +1,6 @@
 // =============================================================================
 // File:    thread.sv
+// Author:  Bruce Liu
 //
 // Module Description:
 //   Computes one output element C[row][col] via address generation and FMA

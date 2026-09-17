@@ -1,5 +1,6 @@
 // =============================================================================
 // File:    rr_write_arbiter.sv
+// Author:  Bruce Liu
 //
 // Module Description:
 //   Round-robin write arbiter: NUM_CORES requesters share one BRAM write port.

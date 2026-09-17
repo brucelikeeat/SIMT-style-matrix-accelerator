@@ -1,5 +1,6 @@
 // =============================================================================
-// File:    dispatcher.sv 
+// File:    dispatcher.sv
+// Author:  Bruce Liu
 //
 // Module Description:
 //   Hands out blocks to whichever core is free, one at a time, as cores free up

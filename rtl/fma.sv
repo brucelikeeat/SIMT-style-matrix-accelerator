@@ -1,5 +1,6 @@
 // =============================================================================
 // File:    fma.sv
+// Author:  Bruce Liu
 //
 // Module Description:
 //   Pipelined fused multiply-accumulate: result = (a * b) + c

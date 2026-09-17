@@ -104,17 +104,18 @@ Fake cores always ready; checks thread ID assignment order, totals `N*N`,
 stays busy; comment mentions 8×8 but only runs `N=4`.
 
 **Revisions:**
-- **v1** — Pouya Hatami (initial)
-- **v2** — Bruce Liu (docs / light maintenance — **[EMPTY if you did more]**)
+- **v1** — Pouya Hatami (initial TB)
+- **v2** — Bruce Liu (updates; matches `dispatcher.sv` which Bruce owns)
 
 **Status:** historically passing.
 **[EMPTY — reconfirm against current `dispatcher.sv`]**
 
 ### `tb/arbiter/rr_read_arbiter_tb.sv` / `rr_write_arbiter_tb.sv`
 
-Standalone arbiter tests (+ `run_read.do` / `run_write.do`).
+Standalone tests for `rr_read_arbiter` / `rr_write_arbiter` (RTL by Bruce Liu).
+Scripts: `run_read.do` / `run_write.do`.
 
-**[EMPTY — summarize exact scenarios from those files / pass status]**
+**[EMPTY — summarize exact scenarios / pass status / who wrote the TB vs RTL]**
 
 ### `src/tb/MemController/mem_controller_tb.sv`
 

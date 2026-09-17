@@ -1,5 +1,6 @@
 // =============================================================================
 // File:    rr_read_arbiter.sv
+// Author:  Bruce Liu
 //
 // Module Description:
 //   Round-robin read arbiter: NUM_CORES requesters share one BRAM read port.
